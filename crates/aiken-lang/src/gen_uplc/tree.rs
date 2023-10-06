@@ -117,11 +117,6 @@ pub enum AirTree {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum AirStatement {
-    // Assignment
-    Let {
-        name: String,
-        value: Box<AirTree>,
-    },
     DefineFunc {
         func_name: String,
         module_name: String,
@@ -209,6 +204,13 @@ pub enum AirStatement {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum AirExpression {
+    // Assignment
+    Let {
+        name: String,
+        value: Box<AirTree>,
+        then: Box<AirTree>,
+    },
+
     // Primitives
     Int {
         value: String,
@@ -493,14 +495,12 @@ impl AirTree {
             arg: arg.into(),
         })
     }
-    pub fn let_assignment(name: impl ToString, value: AirTree) -> AirTree {
-        AirTree::Statement {
-            statement: AirStatement::Let {
-                name: name.to_string(),
-                value: value.into(),
-            },
-            hoisted_over: None,
-        }
+    pub fn let_assignment(name: impl ToString, value: AirTree, then: AirTree) -> AirTree {
+        AirTree::Expression(AirExpression::Let {
+            name: name.to_string(),
+            value: value.into(),
+            then: then.into(),
+        })
     }
     pub fn cast_from_data(value: AirTree, tipo: Rc<Type>) -> AirTree {
         AirTree::Expression(AirExpression::CastFromData {
@@ -752,6 +752,7 @@ impl AirTree {
             hoisted_over: None,
         }
     }
+
     pub fn list_access(
         names: Vec<String>,
         tipo: Rc<Type>,
