@@ -266,7 +266,8 @@ impl<'a> CodeGenerator<'a> {
                     .map(|elem| self.build(elem, module_name, context))
                     .collect_vec(),
                 tipo.clone(),
-                tail.as_ref().map(|tail| self.build(tail, module_name, context)),
+                tail.as_ref()
+                    .map(|tail| self.build(tail, module_name, context)),
             ),
 
             TypedExpr::Call {
@@ -576,7 +577,11 @@ impl<'a> CodeGenerator<'a> {
                         clauses,
                     );
 
-                    AirTree::let_assignment(&constr_var, self.build(subject, module_name, context), when_assign)
+                    AirTree::let_assignment(
+                        &constr_var,
+                        self.build(subject, module_name, context),
+                        when_assign,
+                    )
                 }
             }
 
@@ -718,7 +723,11 @@ impl<'a> CodeGenerator<'a> {
                 index, tuple, tipo, ..
             } => {
                 if tuple.tipo().is_2_tuple() {
-                    AirTree::pair_index(*index, tipo.clone(), self.build(tuple, module_name, context))
+                    AirTree::pair_index(
+                        *index,
+                        tipo.clone(),
+                        self.build(tuple, module_name, context),
+                    )
                 } else {
                     let function_name = format!("__access_index_{}", *index);
 
@@ -784,7 +793,9 @@ impl<'a> CodeGenerator<'a> {
                     update_args,
                 )
             }
-            TypedExpr::UnOp { value, op, .. } => AirTree::unop(*op, self.build(value, module_name, context)),
+            TypedExpr::UnOp { value, op, .. } => {
+                AirTree::unop(*op, self.build(value, module_name, context))
+            }
             TypedExpr::CurvePoint { point, .. } => AirTree::curve(*point.as_ref()),
         }
     }
@@ -1606,10 +1617,16 @@ impl<'a> CodeGenerator<'a> {
                             .collect_vec();
 
                         let assign = if constr_args.is_empty() {
-                            AirTree::fields_empty(AirTree::local_var(
-                                format!("__constr_var_span_{}_{}", location.start, location.end),
-                                tipo.clone(),
-                            ), msg_term.clone())
+                            AirTree::fields_empty(
+                                AirTree::local_var(
+                                    format!(
+                                        "__constr_var_span_{}_{}",
+                                        location.start, location.end
+                                    ),
+                                    tipo.clone(),
+                                ),
+                                msg_term.clone(),
+                            )
                         } else {
                             AirTree::fields_expose(
                                 indices,
@@ -1619,9 +1636,9 @@ impl<'a> CodeGenerator<'a> {
                                         location.start, location.end
                                     ),
                                     tipo.clone(),
-                                    msg_term.clone(),
-                                    true
                                 ),
+                                msg_term.clone(),
+                                true,
                             )
                         };
 
@@ -1755,9 +1772,7 @@ impl<'a> CodeGenerator<'a> {
                     let data_type = lookup_data_type_by_tipo(&self.data_types, subject_tipo);
 
                     let (clause_cond, clause_assign) =
-                        self.clause_pattern(&clause.pattern, subject_tipo, props);
-
-                    let clause_assign_hoisted = clause_assign.hoist_over(clause_then);
+                        self.clause_pattern(&clause.pattern, subject_tipo, props, clause_then);
 
                     let complex_clause = props.complex_clause;
 
@@ -1772,7 +1787,7 @@ impl<'a> CodeGenerator<'a> {
                         Pattern::Var { .. } | Pattern::Discard { .. }
                     ) {
                         AirTree::wrap_clause(
-                            clause_assign_hoisted,
+                            clause_assign,
                             self.handle_each_clause(
                                 rest_clauses,
                                 final_clause,
@@ -1788,7 +1803,7 @@ impl<'a> CodeGenerator<'a> {
                                 &props.original_subject_name,
                                 clause_cond,
                                 subject_tipo.clone(),
-                                clause_assign_hoisted,
+                                clause_assign,
                                 self.handle_each_clause(
                                     rest_clauses,
                                     final_clause,
@@ -1801,7 +1816,7 @@ impl<'a> CodeGenerator<'a> {
                             )
                         } else {
                             AirTree::wrap_clause(
-                                clause_assign_hoisted,
+                                clause_assign,
                                 self.handle_each_clause(
                                     rest_clauses,
                                     final_clause,
@@ -1820,7 +1835,7 @@ impl<'a> CodeGenerator<'a> {
                             &props.original_subject_name,
                             clause_cond,
                             subject_tipo.clone(),
-                            clause_assign_hoisted,
+                            clause_assign,
                             self.handle_each_clause(
                                 rest_clauses,
                                 final_clause,
@@ -1864,12 +1879,10 @@ impl<'a> CodeGenerator<'a> {
                         };
 
                         let (_, clause_assign) =
-                            self.clause_pattern(&clause.pattern, subject_tipo, props);
-
-                        let clause_assign_hoisted = clause_assign.hoist_over(clause_then);
+                            self.clause_pattern(&clause.pattern, subject_tipo, props, clause_then);
 
                         return AirTree::wrap_clause(
-                            clause_assign_hoisted,
+                            clause_assign,
                             self.handle_each_clause(
                                 rest_clauses,
                                 final_clause,
@@ -1961,9 +1974,7 @@ impl<'a> CodeGenerator<'a> {
                     };
 
                     let (_, clause_assign) =
-                        self.clause_pattern(&clause.pattern, subject_tipo, props);
-
-                    let clause_assign_hoisted = clause_assign.hoist_over(clause_then);
+                        self.clause_pattern(&clause.pattern, subject_tipo, props, clause_then);
 
                     let complex_clause = props.complex_clause;
 
@@ -1973,7 +1984,7 @@ impl<'a> CodeGenerator<'a> {
                         AirTree::list_clause(
                             tail_name,
                             subject_tipo.clone(),
-                            clause_assign_hoisted,
+                            clause_assign,
                             self.handle_each_clause(
                                 rest_clauses,
                                 final_clause,
@@ -1987,7 +1998,7 @@ impl<'a> CodeGenerator<'a> {
                         )
                     } else {
                         AirTree::wrap_clause(
-                            clause_assign_hoisted,
+                            clause_assign,
                             self.handle_each_clause(
                                 rest_clauses,
                                 final_clause,
@@ -2005,7 +2016,7 @@ impl<'a> CodeGenerator<'a> {
                     let current_defined_indices = defined_tuple_indices.clone();
 
                     let (_, pattern_assigns) =
-                        self.clause_pattern(&clause.pattern, subject_tipo, props);
+                        self.clause_pattern(&clause.pattern, subject_tipo, props, clause_then);
 
                     let ClauseProperties {
                         specific_clause:
@@ -2036,7 +2047,7 @@ impl<'a> CodeGenerator<'a> {
 
                     if new_defined_indices.is_empty() {
                         AirTree::wrap_clause(
-                            pattern_assigns.hoist_over(clause_then),
+                            pattern_assigns,
                             self.handle_each_clause(
                                 rest_clauses,
                                 final_clause,
@@ -2052,7 +2063,7 @@ impl<'a> CodeGenerator<'a> {
                             subject_tipo.clone(),
                             new_defined_indices,
                             current_defined_indices,
-                            pattern_assigns.hoist_over(clause_then),
+                            pattern_assigns,
                             self.handle_each_clause(
                                 rest_clauses,
                                 final_clause,
@@ -2075,9 +2086,9 @@ impl<'a> CodeGenerator<'a> {
             let clause_then = self.build(&final_clause.then, module_name, context);
 
             let (condition, assignments) =
-                self.clause_pattern(&final_clause.pattern, subject_tipo, props);
+                self.clause_pattern(&final_clause.pattern, subject_tipo, props, clause_then);
 
-            AirTree::finally(condition, assignments.hoist_over(clause_then))
+            AirTree::finally(condition, assignments)
         }
     }
 
@@ -3608,8 +3619,11 @@ impl<'a> CodeGenerator<'a> {
                                 })
                                 .collect_vec();
 
-                            let mut function_air_tree_body =
-                                self.build(&function_def.body, &generic_function_key.module_name, context);
+                            let mut function_air_tree_body = self.build(
+                                &function_def.body,
+                                &generic_function_key.module_name,
+                                context,
+                            );
 
                             function_air_tree_body.traverse_tree_with(
                                 &mut |air_tree, _| {
@@ -3638,8 +3652,11 @@ impl<'a> CodeGenerator<'a> {
                             .map(|arg| arg.arg_name.get_variable_name().unwrap_or("_").to_string())
                             .collect_vec();
 
-                        let mut function_air_tree_body =
-                            self.build(&function_def.body, &generic_function_key.module_name, context);
+                        let mut function_air_tree_body = self.build(
+                            &function_def.body,
+                            &generic_function_key.module_name,
+                            context,
+                        );
 
                         function_air_tree_body.traverse_tree_with(
                             &mut |air_tree, _| {
