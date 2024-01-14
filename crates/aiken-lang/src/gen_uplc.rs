@@ -2303,10 +2303,11 @@ impl<'a> CodeGenerator<'a> {
                         type_map.insert(index, field_type);
                     }
 
-                    let fields = arguments
-                        .iter()
-                        .enumerate()
-                        .map(|(index, arg)| {
+                    let mut fields = vec![];
+
+                    let next_then = arguments.iter().enumerate().rev().fold(
+                        then,
+                        |inner_then, (index, arg)| {
                             let label = arg.label.clone().unwrap_or_default();
 
                             let field_index = if let Some(field_map) = &field_map {
@@ -2342,41 +2343,42 @@ impl<'a> CodeGenerator<'a> {
                             );
 
                             let statement = if field_name != "_" {
-                                self.nested_clause_condition(&arg.value, arg_type, &mut field_props)
+                                self.nested_clause_condition(
+                                    &arg.value,
+                                    arg_type,
+                                    &mut field_props,
+                                    inner_then,
+                                )
                             } else {
-                                AirTree::no_op()
+                                inner_then
                             };
 
                             props.complex_clause =
                                 props.complex_clause || field_props.complex_clause;
 
-                            (field_index, field_name, arg_type, statement)
-                        })
-                        .collect_vec();
+                            fields.push((field_index, field_name, *arg_type));
 
-                    let indices = fields
-                        .iter()
-                        .map(|(constr_index, name, tipo, _)| {
-                            (*constr_index, name.to_string(), (*tipo).clone())
-                        })
-                        .collect_vec();
+                            statement
+                        },
+                    );
 
-                    let mut air_fields = fields.into_iter().map(|(_, _, _, val)| val).collect_vec();
+                    fields.reverse();
 
                     let field_assign =
                         if check_replaceable_opaque_type(subject_tipo, &self.data_types) {
                             AirTree::let_assignment(
-                                &indices[0].1,
+                                &fields[0].1,
                                 AirTree::local_var(
                                     props.clause_var_name.clone(),
                                     subject_tipo.clone(),
                                 ),
+                                next_then,
                             )
-                        } else if indices.iter().all(|s| s.1 == "_") {
-                            AirTree::no_op()
+                        } else if fields.iter().all(|s| s.1 == "_") {
+                            next_then
                         } else {
                             AirTree::fields_expose(
-                                indices,
+                                fields,
                                 AirTree::local_var(
                                     props.clause_var_name.clone(),
                                     subject_tipo.clone(),
@@ -2384,59 +2386,62 @@ impl<'a> CodeGenerator<'a> {
                                 None,
                                 false,
                             )
+                            .hoist_over(next_then)
                         };
 
-                    let mut sequence = vec![field_assign];
-
-                    sequence.append(&mut air_fields);
-
-                    (
-                        AirTree::int(constr_index),
-                        AirTree::UnhoistedSequence(sequence),
-                    )
+                    (AirTree::int(constr_index), field_assign)
                 }
             }
             Pattern::Tuple { elems, .. } => {
                 let items_type = subject_tipo.get_inner_types();
 
-                let name_index_assigns = elems
-                    .iter()
-                    .enumerate()
-                    .map(|(index, element)| {
-                        let elem_name = match element {
-                            Pattern::Var { name, .. } => name.to_string(),
-                            Pattern::Assign { name, .. } => name.to_string(),
-                            Pattern::Discard { .. } => "_".to_string(),
-                            _ => format!(
-                                "tuple_index_{}_span_{}_{}",
-                                index,
-                                element.location().start,
-                                element.location().end
-                            ),
-                        };
+                let mut name_index_assigns = vec![];
 
-                        let mut tuple_props = ClauseProperties::init_inner(
-                            &items_type[index],
-                            elem_name.clone(),
-                            elem_name.clone(),
-                            props.final_clause,
-                        );
+                let next_then =
+                    elems
+                        .iter()
+                        .enumerate()
+                        .rev()
+                        .fold(then, |inner_then, (index, element)| {
+                            let elem_name = match element {
+                                Pattern::Var { name, .. } => name.to_string(),
+                                Pattern::Assign { name, .. } => name.to_string(),
+                                Pattern::Discard { .. } => "_".to_string(),
+                                _ => format!(
+                                    "tuple_index_{}_span_{}_{}",
+                                    index,
+                                    element.location().start,
+                                    element.location().end
+                                ),
+                            };
 
-                        let elem = if elem_name != "_" {
-                            self.nested_clause_condition(
-                                element,
+                            let mut tuple_props = ClauseProperties::init_inner(
                                 &items_type[index],
-                                &mut tuple_props,
-                            )
-                        } else {
-                            AirTree::no_op()
-                        };
+                                elem_name.clone(),
+                                elem_name.clone(),
+                                props.final_clause,
+                            );
 
-                        props.complex_clause = props.complex_clause || tuple_props.complex_clause;
+                            let elem = if elem_name != "_" {
+                                self.nested_clause_condition(
+                                    element,
+                                    &items_type[index],
+                                    &mut tuple_props,
+                                    inner_then,
+                                )
+                            } else {
+                                inner_then
+                            };
 
-                        (elem_name, index, elem)
-                    })
-                    .collect_vec();
+                            props.complex_clause =
+                                props.complex_clause || tuple_props.complex_clause;
+
+                            name_index_assigns.push((elem_name, index));
+
+                            elem
+                        });
+
+                name_index_assigns.reverse();
 
                 let mut defined_indices = match props.clone() {
                     ClauseProperties {

@@ -886,8 +886,6 @@ impl AirTree {
             vec![head_list],
         );
 
-        let assign = AirTree::let_assignment("_", expect_on_head);
-
         let next_call = AirTree::call(
             AirTree::var(
                 ValueConstructor::public(
@@ -915,11 +913,13 @@ impl AirTree {
             ],
         );
 
+        let assign = AirTree::let_assignment("_", expect_on_head, next_call);
+
         AirTree::list_clause(
             "__list_to_check",
             void(),
             AirTree::void(),
-            assign.hoist_over(next_call),
+            assign,
             None,
             false,
         )
@@ -938,10 +938,6 @@ impl AirTree {
                 hoisted_over: Some(exp),
             } => {
                 match statement {
-                    AirStatement::Let { value, name } => {
-                        air_vec.push(Air::Let { name: name.clone() });
-                        value.create_air_vec(air_vec);
-                    }
                     AirStatement::DefineFunc {
                         func_name,
                         module_name,
@@ -1140,6 +1136,11 @@ impl AirTree {
                 exp.create_air_vec(air_vec);
             }
             AirTree::Expression(exp) => match exp {
+                AirExpression::Let { value, then, name } => {
+                    air_vec.push(Air::Let { name: name.clone() });
+                    value.create_air_vec(air_vec);
+                    then.create_air_vec(air_vec);
+                }
                 AirExpression::Int { value } => air_vec.push(Air::Int {
                     value: value.clone(),
                 }),
@@ -1506,9 +1507,10 @@ impl AirTree {
         let mut index_count = IndexCounter::new();
         tree_path.push(current_depth, depth_index);
 
-        if let AirTree::Statement { statement, .. } = self {
-            match statement {
-                AirStatement::Let { value, .. } => {
+        match self {
+            AirTree::UnhoistedSequence(..) => unreachable!("No unhoisted sequence at this point"),
+            AirTree::Expression(expr) => match expr {
+                AirExpression::Let { value, .. } => {
                     value.do_traverse_tree_with(
                         tree_path,
                         current_depth + 1,
@@ -1517,6 +1519,9 @@ impl AirTree {
                         apply_with_func_last,
                     );
                 }
+                _ => (),
+            },
+            AirTree::Statement { statement, .. } => match statement {
                 AirStatement::DefineFunc { func_body, .. } => {
                     func_body.do_traverse_tree_with(
                         tree_path,
@@ -1617,7 +1622,7 @@ impl AirTree {
                         apply_with_func_last,
                     );
                 }
-            };
+            },
         }
 
         if !apply_with_func_last {
@@ -1638,6 +1643,15 @@ impl AirTree {
                 );
             }
             AirTree::Expression(e) => match e {
+                AirExpression::Let { then, .. } => {
+                    then.do_traverse_tree_with(
+                        tree_path,
+                        current_depth + 1,
+                        index_count.next_number(),
+                        with,
+                        apply_with_func_last,
+                    );
+                }
                 AirExpression::List { items, .. } => {
                     for item in items {
                         item.do_traverse_tree_with(
@@ -1976,15 +1990,6 @@ impl AirTree {
                     statement,
                     hoisted_over: Some(hoisted_over),
                 } => match statement {
-                    AirStatement::Let { value, .. } => {
-                        if *index == 0 {
-                            value.as_mut().do_find_air_tree_node(tree_path_iter)
-                        } else if *index == 1 {
-                            hoisted_over.as_mut().do_find_air_tree_node(tree_path_iter)
-                        } else {
-                            panic!("Tree Path index outside tree children nodes")
-                        }
-                    }
                     AirStatement::AssertConstr { constr, .. } => {
                         if *index == 0 {
                             constr.as_mut().do_find_air_tree_node(tree_path_iter)
@@ -2089,6 +2094,15 @@ impl AirTree {
                     }
                 },
                 AirTree::Expression(e) => match e {
+                    AirExpression::Let { value, then, .. } => {
+                        if *index == 0 {
+                            value.as_mut().do_find_air_tree_node(tree_path_iter)
+                        } else if *index == 1 {
+                            then.as_mut().do_find_air_tree_node(tree_path_iter)
+                        } else {
+                            panic!("Tree Path index outside tree children nodes")
+                        }
+                    }
                     AirExpression::List { items, .. }
                     | AirExpression::Tuple { items, .. }
                     | AirExpression::Builtin { args: items, .. } => {
